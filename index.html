@@ -922,7 +922,7 @@ function setSpeed(v){
 // =====================================================================
 // 操作
 // =====================================================================
-function setPage(p){ if(S.running) pauseTime(); S.page = p; if (p!=='detail') S.detail = null; render(); }
+function setPage(p){ S.page = p; if (p!=='detail') S.detail = null; render(); }
 function goDetail(i){ S.page='detail'; S.detail=i; render(); }
 function selBuild(k){ if (!S.started || !unlocked(k)) return; S.sel = (S.sel===k?null:k); render(); }
 
@@ -936,7 +936,7 @@ function cellClick(i){
   }
   if (S.sel){
     const k = S.sel;
-    if (S.cells[i]) return addLog('这块地已经占了。');
+    if (S.cells[i]) return goDetail(i);
     if (!canPlace(k,i)) return addLog(placeReason(k,i));
     S.cells[i] = Object.assign(newProject(Object.assign({},BUILD[k].cost), BUILD[k].time), {kind:'work', type:k, crew:0});
     addLog('下达建造令：'+BUILD[k].name+'（需要 '+costText(BUILD[k].cost)+'）。材料和人手会自动往里填。');
