@@ -476,12 +476,15 @@ function genTerrain(){
   if (count('iron') < 5) vein('iron', 3);
   return a;
 }
-// 拓殖期：前 20 年（开荒保护 + 移民敞开）
+// 拓殖期：前 20 年（移民敞开）
 const PIONEER_YEARS = 20;
+// 民意激活门槛：人口达到 30 人，拓荒（5–30 人）结束、定居（30–300 人）开始。
+// 依据设计文档七纪元表：拓荒期的核心问题是"会不会饿死"，合法性来源是生存能力——30 人以下不存在民意政治。
+const SOCIETY_POP = 30;
 function newGame(){
   if (timer){ clearInterval(timer); timer = null; }
   const morale = {};
-  Object.keys(BUILD).forEach(k=> morale[k] = {S:65, G:20});
+  Object.keys(BUILD).forEach(k=> morale[k] = {S:65, G:0});
   S = {
     t:0, running:false, started:false,
     page:'map', detail:null,
@@ -489,7 +492,7 @@ function newGame(){
     res:{food:60, wood:80, coal:40, iron:20, money:0, knowledge:0},
     terrain: genTerrain(),
     cells: new Array(SIZE).fill(null),
-    morale, debuff:{}, cd:3,
+    morale, debuff:{}, cd:3, societyOn:false,
     lifeMod:0,                       // 预期寿命修正：医药、粮食、住房等以后往这里加
     noFuel:false, warnedFuel:false,
     speed:1, zoom:0,                 // zoom=0 表示"自动铺满"；>1 则按倍数放大并可滚动
@@ -554,7 +557,9 @@ function effOf(b){
   if (!p || b.workers<=0) return 0;
   return curveVal(b.workers/p);
 }
-function moodCoeff(t){ return 0.7+0.3*S.morale[t].S/100; }
+// 是否已形成"社会"：人口达到门槛后民意系统才存在（一次性 latch，不因人口回落而关闭）
+function hasSociety(){ return !!S.societyOn; }
+function moodCoeff(t){ if(!hasSociety()) return 1; return 0.7+0.3*S.morale[t].S/100; }
 function evMult(t){ return S.debuff[t] ? S.debuff[t].mult : 1; }
 function knowBonus(){ return 1 + Math.min(0.10, Math.floor(S.res.knowledge/100)*0.01); }
 
@@ -709,7 +714,7 @@ function demogYear(surplus){
   const women = S.demog.f[1] + S.demog.f[2];
   const foodK = surplus >= 1 ? 1.0 : (surplus >= 0 ? 0.6 : (S.res.food > 0 ? 0.2 : 0));
   const bedK  = bedFactor();
-  const moodK = 0.7 + 0.6*(avgMorale()/100);
+  const moodK = hasSociety() ? 0.7 + 0.6*(avgMorale()/100) : 1;
   let births = ofType('farm').length ? women * FERT * foodK * bedK * moodK : 0;
   S.demog.m[0] += births/2; S.demog.f[0] += births/2;
 
@@ -720,7 +725,8 @@ function demogYear(surplus){
   const wave = pioneer || S.t % 2 === 0;                       // 拓殖期每年一批，之后隔年
   const cap  = pioneer ? 10 : (S.t <= 50 ? 4 : 3);             // 每批上限
   const need = pioneer ? 45 : 50;                              // 拓殖期民意门槛更低
-  if (wave && surplus >= 1 && freeBeds >= 3 && avgMorale() >= need){
+  // 拓荒期（未形成社会）没有民意，移民只看空床和余粮
+  if (wave && surplus >= 1 && freeBeds >= 3 && (!hasSociety() || avgMorale() >= need)){
     imm = Math.min(Math.round((pioneer ? 3 : 2) + vac/2), freeBeds - 1, cap);
     const a = [imm*0.10, imm*0.55, imm*0.30, imm*0.05, 0];
     for (let i=0;i<5;i++){ S.demog.m[i] += a[i]/2; S.demog.f[i] += a[i]/2; }
@@ -994,19 +1000,19 @@ const EVENTS = {
     {g:30,name:'私藏粮',mult:0.9,left:2,gAdd:0,txt:'各户私下留了一成，报上来已成“耗损”'}
   ],
   lumber:[
-    {g:50,name:'封山',mult:0.3,left:2,gAdd:9,txt:'樵夫堵了山口，说林子是祖上的'},
+    {g:50,name:'封山',mult:0.5,left:2,gAdd:9,txt:'樵夫堵了山口，说林子是祖上的'},
     {g:50,name:'盗伐',mult:0.7,left:3,gAdd:6,txt:'夜里有人往外运木头，账上少了三成'},
     {g:30,name:'怠工',mult:0.85,left:2,gAdd:0,txt:'斧子卷了口，谁也不去磨'},
     {g:30,name:'私卖',mult:0.9,left:2,gAdd:0,txt:'成材被挑走，留下的都是枝杈'}
   ],
   mine:[
     {g:50,name:'塌方',mult:0.5,left:3,gAdd:8,txt:'井壁塌了半边，抬出来两个人'},
-    {g:50,name:'封矿',mult:0.3,left:1,gAdd:10,txt:'矿工堵了井口，说不换木料就不下去'},
+    {g:50,name:'封矿',mult:0.5,left:1,gAdd:10,txt:'矿工堵了井口，说不换木料就不下去'},
     {g:30,name:'怠工',mult:0.85,left:2,gAdd:0,txt:'一班人下去，两班人在地面上晒太阳'},
     {g:30,name:'毁具',mult:0.9,left:3,gAdd:0,txt:'凿子断了十几把，这个月只领到三把'}
   ],
   barracks:[
-    {g:50,name:'哗变',mult:0.4,left:2,gAdd:9,txt:'营里断了半个月的饷，兵士聚在辕门外'},
+    {g:50,name:'哗变',mult:0.5,left:2,gAdd:9,txt:'营里断了半个月的饷，兵士聚在辕门外'},
     {g:30,name:'逃兵',mult:0.7,left:3,gAdd:4,txt:'夜里跑了七个人，枪还架在架上'}
   ],
   uni:[
@@ -1014,13 +1020,14 @@ const EVENTS = {
     {g:30,name:'敷衍',mult:0.8,left:2,gAdd:0,txt:'讲堂里坐满了人，笔记一页没记'}
   ],
   bank:[
-    {g:50,name:'挤兑',mult:0.4,left:2,gAdd:9,txt:'天没亮门口就排了队，要把钱全取走'},
+    {g:50,name:'挤兑',mult:0.5,left:2,gAdd:9,txt:'天没亮门口就排了队，要把钱全取走'},
     {g:30,name:'惜贷',mult:0.8,left:3,gAdd:0,txt:'掌柜的说这年头谁还敢放款'}
   ]
 };
 function tryEvent(){
+  if (!hasSociety()) return;
   if (S.cd>0){ S.cd--; return; }
-  if (Math.random()>0.55) return;
+  if (Math.random()>0.40) return;
   const pool = Object.keys(BUILD).filter(k=>ofType(k).length && S.morale[k].G>=30 && EVENTS[k]);
   if (!pool.length) return;
   if (Object.keys(S.debuff).length>=1) return;
@@ -1032,7 +1039,7 @@ function tryEvent(){
   const ev = pick(cand.length?cand:EVENTS[ind]);
   S.debuff[ind] = {mult:ev.mult, left:ev.left, name:ev.name};
   S.morale[ind].G = Math.min(100, S.morale[ind].G+ev.gAdd);
-  S.cd = rnd(2,4);
+  S.cd = rnd(3,6);
   addLog('【'+BUILD[ind].name+'】'+ev.txt);
 }
 
@@ -1041,7 +1048,7 @@ function tryEvent(){
 // =====================================================================
 function nextYear(){
   S.t++;
-  if (S.t === PIONEER_YEARS + 1) addLog('拓殖期结束：开荒保护取消，移民收紧，积怨开始真正积累。');
+  if (S.t === PIONEER_YEARS + 1) addLog('拓殖期结束：移民敞开取消，此后每两年才有一波移民，且要等床位空出来。');
   if (!S.failed && S.pop <= 3){
     S.failed = true;
     addLog('人口只剩 3 人，殖民地已经维持不下去——这一局结束了。');
@@ -1138,9 +1145,16 @@ function nextYear(){
   S.res.knowledge = Math.min(S.res.knowledge, 9999);
   clampLabor();
 
-  // 民意
+  // 民意激活：人口达到门槛，拓荒结束、定居开始（设计文档：拓荒 5–30 人，定居 30–300 人）
+  if (!S.societyOn && S.pop >= SOCIETY_POP){
+    S.societyOn = true;
+    Object.keys(BUILD).forEach(k=> S.morale[k] = {S:65, G:0});
+    addLog('人口达到 '+SOCIETY_POP+' 人——这里不再是一支求生队，而是一个定居点。从今年起民意开始成为问题：缺员与饥馑会积累积怨，行业积怨过深会闹事。');
+  }
+
+  // 民意：未形成社会之前整套系统不存在（没有 S/G、没有事件、没有民意惩罚）
   const hungry = S.res.food < eat*1.2;
-  Object.keys(BUILD).forEach(k=>{
+  if (hasSociety()) Object.keys(BUILD).forEach(k=>{
     const list = ofType(k);
     if (!list.length) return;
     const m = S.morale[k];
@@ -1151,11 +1165,6 @@ function nextYear(){
     m.S += (T-m.S)*0.3;
     if (short>0.2 || hungry) m.G = Math.min(100,m.G+1);
     if (m.S>75) m.G = Math.max(0,m.G-1);
-    // 开荒保护：前 20 年士气有底、积怨封顶（封在事件门槛 30 之下，负面事件不会触发）
-    if (S.t <= PIONEER_YEARS){
-      m.S = Math.max(m.S, 55);
-      m.G = Math.min(m.G, 25);
-    }
     if (S.debuff[k]){
       S.debuff[k].left--;
       if (S.debuff[k].left<=0){ addLog('【'+BUILD[k].name+'】'+S.debuff[k].name+' 已平息'); delete S.debuff[k]; }
@@ -1179,8 +1188,10 @@ function render(){
     (S.failed
       ? ' <span class="tag" style="background:#5d2f2f;color:#f0d0d0;border-color:#7a3f3f">✖ 拓殖失败</span>'
       : '') +
-    (S.started && S.t <= PIONEER_YEARS
-      ? ' <span class="tag" style="background:rgba(47,93,58,.55);color:#cfe9d6;border:1px solid #3f7a4d">拓殖期 · 还剩 '+(PIONEER_YEARS-S.t)+' 年</span>'
+    (S.started
+      ? (S.societyOn
+          ? ' <span class="tag" style="background:rgba(47,93,58,.55);color:#cfe9d6;border:1px solid #3f7a4d">定居期 · 民意已激活</span>'
+          : ' <span class="tag" style="background:rgba(47,93,58,.55);color:#cfe9d6;border:1px solid #3f7a4d">拓荒期 · 人口 '+S.pop+' / '+SOCIETY_POP+' 形成社会</span>')
       : '') +
     '</div>' +
     '<div class="ctrls">' +
@@ -1361,7 +1372,7 @@ function viewDetail(){
       '<div class="kv">'+
         '<div><div class="v">'+outputOf(c).toFixed(1)+'</div><div class="l">'+(RESNAME[outRes(c)]||'—')+' / 年</div></div>'+
         '<div><div class="v">'+effOf(c).toFixed(0)+'%</div><div class="l">效率</div></div>'+
-        '<div><div class="v">'+moodCoeff(c.type).toFixed(2)+'</div><div class="l">民意系数</div></div>'+
+        '<div><div class="v">'+(hasSociety()?moodCoeff(c.type).toFixed(2):'—')+'</div><div class="l">'+(hasSociety()?'民意系数':'民意系数 · 拓荒期无')+'</div></div>'+
         '<div><div class="v">'+(m===null?'—':(m>=0?'+':'')+m.toFixed(1)+'%')+'</div><div class="l">再加一人</div></div>'+
       '</div>';
   }
@@ -1427,16 +1438,22 @@ function viewMorale(){
       '人口用<b>队列成分法</b>逐年推算，不是固定 +N：<br>'+
       '① <b>老化</b>：每个 15 年年龄桶每年有 1/15 的人流入下一个桶（15 年后 0–14 全变 15–29）；<br>'+
       '② <b>死亡</b>：分年龄死亡率 0–14 3.5%、15–29 1.0%、30–44 1.4%、45–59 2.8%、60+ 10%（古代水平）；<br>'+
-      '③ <b>出生</b>：15–44 岁女性人数 × <b>0.15</b>（TFR≈4.5）× 粮食修正 × 床位修正 × 民意修正；没农庄就不生；<br>'+
+      '③ <b>出生</b>：15–44 岁女性人数 × <b>0.15</b>（TFR≈4.5）× 粮食修正 × 床位修正 × 民意修正（<b>人口达到 30 人前恒为 1</b>，拓荒期不讲民心）；没农庄就不生；<br>'+
       '　　<b>床位修正（住房是生育的硬前提）</b>：空床 ≥2 → ×1.00，空床 1 → ×0.70，正好满床 → ×0.35，超员 1–2 人 → ×0.15，超员 ≥3 人 → ×0。当前 <b>×'+bedFactor().toFixed(2)+'</b>，所以不盖住宅就等于把人口锁死；<br>'+
-      '④ <b>迁入</b>：有余粮、空床 ≥ 3、平均民意 ≥ 45 时来人（不看空岗，先来人再找活）。<b>前 20 年是拓殖期</b>，每年一批最多 10 人，且士气保底 55、积怨封顶 25（不会触发负面事件）；之后隔年一批，上限降到 3–4 人；<br>'+
+      '④ <b>迁入</b>：有余粮、空床 ≥ 3 时来人（不看空岗，先来人再找活）。<b>前 20 年是拓殖期</b>，每年一批最多 10 人；之后隔年一批，上限降到 3–4 人。<b>人口达到 30 人之前没有民意这回事</b>——拓荒期只是求生队，形成社会后移民才开始看民意；<br>'+
       '⑤ 人口 = 上面几项相加后四舍五入，硬上限 300。<br>'+
       '⑥ <b>预期寿命</b>由当前分年龄死亡率反推，现在是 '+lifeExpectancy().toFixed(0)+
       ' 岁（被儿童夭折率拉低）。以后医药、粮食、住房只改 <code>寿命修正</code> 一个数。'+
     '</div></div>';
 
   const rows = Object.keys(BUILD).filter(k=>ofType(k).length);
-  let th = '<table><tr><th>行业</th><th>建筑</th><th>用工</th><th>产出 / 年</th><th>S 短期情绪</th><th>G 长期怨恨</th><th>状态</th></tr>';
+  let th = '';
+  if (!hasSociety()){
+    th = '<div class="panel"><h3>行业民意</h3>'+
+      '<div class="empty-note">拓荒期：这里还是一支求生队，尚未形成社会——没有民意，也没有行业事件。<br>'+
+      '人口达到 <b>'+SOCIETY_POP+'</b> 人（当前 '+Math.floor(S.pop)+' 人）进入定居期后，民意系统才会激活。</div></div>';
+  } else {
+  th = '<table><tr><th>行业</th><th>建筑</th><th>用工</th><th>产出 / 年</th><th>S 短期情绪</th><th>G 长期怨恨</th><th>状态</th></tr>';
   rows.forEach(k=>{
     const list = ofType(k), m = S.morale[k];
     const w = list.reduce((s,x)=>s+x.b.workers,0);
@@ -1451,14 +1468,15 @@ function viewMorale(){
       '<td><div class="bar g"><i style="width:'+m.G+'%"></i></div><span class="small">'+m.G.toFixed(0)+'</span></td>'+
       '<td class="'+st[1]+'">'+st[0]+(S.debuff[k]?'<br><span class="small">'+S.debuff[k].name+'</span>':'')+'</td></tr>';
   });
-  th += '</table>';
+    th += '</table>';
+  }
 
   return popBox + '<div class="panel" style="margin-bottom:10px"><h3>民意</h3>'+
     (rows.length?th:'<div class="empty-note">还没有任何建筑，也就还没有民意。</div>')+'</div>'+
     '<div class="panel"><h3>这两个数</h3><div class="small" style="line-height:1.8">'+
-    '<b>S 短期情绪</b>（0–100）：这一季过得好不好。缺人、缺粮会拉低，人满、有余粮会拉高。<br>'+
+    '<b>S 短期情绪</b>（0–100）：这一季过得好不好。缺人、缺粮会拉低，人满、有余粮会拉高。<b>人口达到 30 人后系统才启动，启动时 S=65、G=0</b>——新社会不背历史积怨。<br>'+
     '<b>G 长期怨恨</b>（0–100）：攒下来的账。缺人缺粮每季 +1，S 很高时每季 −1，事件会把它推上去。<br>'+
-    '<b>产量</b> = 设计岗 × 单产 × 效率曲线 × 民意系数（0.7 + 0.3 × S/100）× 地块加成 × 学识加成。<br>'+
+    '<b>产量</b> = 设计岗 × 单产 × 效率曲线 × 民意系数（0.7 + 0.3 × S/100，<b>拓荒期恒为 1</b>）× 地块加成 × 学识加成。<br>'+
     '<b>G ≥ 30</b> 才开始有负面事件，G 越高越容易被抽中。</div></div>';
 }
 
