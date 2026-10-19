@@ -349,7 +349,7 @@ const BUILD = {
   house:  {name:'住宅', cat:'民生', post:0, unit:0, where:['grass'], cost:{wood:20}, time:1,
            cap:[10,20,30], desc:'住人，人口上限靠它'},
   farm:   {name:'农庄', cat:'生产', post:6, unit:2.5, out:'food',  where:['grass','soil'], cost:{wood:30}, time:2},
-  lumber: {name:'伐木场', cat:'生产', post:5, unit:2,   out:'wood',  where:['forest'], cost:{}, time:2},
+  lumber: {name:'伐木场', cat:'生产', post:5, unit:2,   out:'wood',  where:['forest'], cost:{wood:10}, time:2},
   mine:   {name:'矿场', cat:'生产', post:6, unit:1.5, out:'ore',   where:['coal','iron'], cost:{wood:20}, time:3},
   barracks:{name:'军营', cat:'军政', post:10, unit:0, where:['grass'], cost:{wood:40,iron:25}, time:3, unlock:3,
            desc:'不产出资源（战斗系统未做）'},
@@ -868,6 +868,16 @@ function nextYear(){
     if (o>0){ S.res[outRes(b)] += o; if (outRes(b)==='food') producedFood += o; }
   });
 
+  // 没有伐木场时，村民就近捡枯枝：每年 +3 木、上限 20
+  // —— 保证"花错一次"不会永久卡死，但 20 木盖不起农庄（30），必须把伐木场补回来
+  if (ofType('lumber').length === 0 && S.res.wood < 20){
+    S.res.wood = Math.min(20, S.res.wood + 3);
+    if (!S.warnedWood){
+      S.warnedWood = true;
+      addLog('没有伐木场，村民只能捡枯枝：木材每年最多 +3、存到 20 为止。先补一座伐木场（木 10）。');
+    }
+  }
+
   // 吃饭
   const eat = S.pop*1;
   if (S.res.food >= eat) S.res.food -= eat;
@@ -913,10 +923,6 @@ function nextYear(){
   });
 
   tryEvent();
-  if (!S.warnedWood && S.res.wood < 5 && ofType('lumber').length === 0){
-    S.warnedWood = true;
-    addLog('木材见底，也还没有伐木场。伐木场不需要材料，先免费盖一座。');
-  }
   render();
 }
 
