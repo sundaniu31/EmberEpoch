@@ -680,6 +680,93 @@ function costText(c){ const k = Object.keys(c); return k.length ? k.map(r=>RESNA
 function canPay(c){ for (const r in c) if (S.res[r] < c[r]) return false; return true; }
 function pay(c){ for (const r in c) S.res[r] -= c[r]; }
 
+// ---------- 建造命令：材料按年填充，没有材料就停着等 ----------
+function newProject(need, years){
+  return { prog:0, total:years, need:need, paid:{}, stocked:false };
+}
+function projText(p){
+  const ks = Object.keys(p.need);
+  return ks.map(r=>{
+    const have = Math.min(p.paid[r]||0, p.need[r]);
+    const shown = Math.round(have*10)/10, want = Math.round(p.need[r]*10)/10;
+    return RESNAME[r]+' '+shown+'/'+want;
+  }).join('　');
+}
+function projStocked(p){
+  return Object.keys(p.need).every(r=>(p.paid[r]||0) >= p.need[r]-1e-9);
+}
+// 每年把库存往各个在建项目里填，填满就开工
+function fillProjects(){
+  const one = p=>{
+    if (!p) return;
+    Object.keys(p.need).forEach(r=>{
+      const have = p.paid[r]||0, want = p.need[r];
+      if (have >= want) return;
+      const take = Math.min(want-have, S.res[r]);
+      if (take > 0){ S.res[r] -= take; p.paid[r] = have + take; }
+    });
+    p.stocked = projStocked(p);
+  };
+  S.cells.forEach(c=>{
+    if (isWork(c)) one(c);
+    else if (isBuilt(c) && c.upg) one(c.upg);
+  });
+  const p = presCell(); if (p && p.upg) one(p.upg);
+}
+function spentText(p){ return projText(p); }
+function refund(cost, ratio){
+  const back = {};
+  Object.keys(cost).forEach(r=>{ const v = Math.floor(cost[r]*ratio); if (v>0) back[r] = v; });
+  Object.keys(back).forEach(r=>{ S.res[r] = Math.min(9999, S.res[r] + back[r]); });
+  return back;
+}
+function refundPreview(c){
+  const inv = c.invested || BUILD[c.type].cost, o = {};
+  Object.keys(inv).forEach(r=>{ const v = Math.floor(inv[r]*0.8); if (v>0) o[r] = v; });
+  return o;
+}
+function projShort(p){
+  const ks = Object.keys(p.need).slice(0,2);
+  return ks.map(r=>RESNAME[r]+' '+Math.round((p.paid[r]||0))+'/'+Math.round(p.need[r])).join(' ');
+}
+function addInvested(b, cost){
+  b.invested = b.invested || {};
+  Object.keys(cost).forEach(r=>{ b.invested[r] = (b.invested[r]||0) + cost[r]; });
+}
+// 取消没建成的工地：已填进去的材料全额退回
+function cancelSite(i){
+  const c = S.cells[i];
+  if (!isWork(c)) return;
+  const back = {};
+  Object.keys(c.paid||{}).forEach(r=>{ if (c.paid[r] > 0) back[r] = c.paid[r]; });
+  Object.keys(back).forEach(r=>{ S.res[r] = Math.min(9999, S.res[r] + back[r]); });
+  S.cells[i] = null;
+  addLog('取消建造：'+BUILD[c.type].name+'，已投入的材料（'+(Object.keys(back).length?costText(back):'无')+'）全额退回。');
+  render();
+}
+// 拆除已建成的建筑：返还累计投入的 80%
+function demolish(i){
+  const c = S.cells[i];
+  if (!c) return;
+  if (isPres(c)) return addLog('总统府不能拆除。');
+  if (!isBuilt(c)) return;
+  const invested = c.invested || BUILD[c.type].cost;
+  const back = refund(invested, 0.8);
+  S.cells[i] = null;
+  addLog('拆除：'+BUILD[c.type].name+'（Lv'+c.lv+'），返还 '+(Object.keys(back).length?costText(back):'无')+'（累计投入的 80%）。');
+  render();
+}
+function cancelUpgrade(i){
+  const c = S.cells[i];
+  if (!c || !c.upg) return;
+  const back = {};
+  Object.keys(c.upg.paid||{}).forEach(r=>{ if (c.upg.paid[r] > 0) back[r] = c.upg.paid[r]; });
+  Object.keys(back).forEach(r=>{ S.res[r] = Math.min(9999, S.res[r] + back[r]); });
+  c.upg = null;
+  addLog('取消升级：已投入的材料（'+(Object.keys(back).length?costText(back):'无')+'）全额退回。');
+  render();
+}
+
 // =====================================================================
 // 时间
 // =====================================================================
@@ -712,11 +799,9 @@ function cellClick(i){
     const k = S.sel;
     if (S.cells[i]) return addLog('这块地已经占了。');
     if (!canPlace(k,i)) return addLog(placeReason(k,i));
-    if (!canPay(BUILD[k].cost)) return addLog('材料不足：'+costText(BUILD[k].cost));
     if (unemployed() < 2) return addLog('没有无业人口开工（工地要 2 人）。');
-    pay(BUILD[k].cost);
-    S.cells[i] = {kind:'work', type:k, prog:0, total:BUILD[k].time, crew:2};
-    addLog('动工：'+BUILD[k].name+'（2 人，'+BUILD[k].time+' 年）');
+    S.cells[i] = Object.assign(newProject(Object.assign({},BUILD[k].cost), BUILD[k].time), {kind:'work', type:k, crew:2});
+    addLog('下达建造令：'+BUILD[k].name+'（需要 '+costText(BUILD[k].cost)+'，材料凑齐后才开始计工期）');
     S.sel = null;
     return render();
   }
@@ -738,22 +823,18 @@ function setLimit(b, v){
 }
 
 function startUpgrade(b){
-  if (!isBuilt(b) || b.lv>=3) return;
+  if (!isBuilt(b) || b.lv>=3 || b.upg) return;
   const c = upgradeCost(b);
-  if (!canPay(c)) return addLog('升级材料不足：'+costText(c));
-  pay(c);
-  b.upg = {prog:0, total:BUILD[b.type].time};
-  addLog(BUILD[b.type].name+' 开始升级（暂停生产，'+BUILD[b.type].time+' 年）');
+  b.upg = newProject(c, BUILD[b.type].time);
+  addLog(BUILD[b.type].name+' 升级到 Lv'+(b.lv+1)+'：需要 '+costText(c)+'，材料凑齐后开工。');
   render();
 }
 function startPresUpgrade(){
   const p = presCell();
-  if (!p || p.lv>=4) return;
+  if (!p || p.lv>=4 || p.upg) return;
   const up = PRES_UP[p.lv-1];
-  if (!canPay(up.cost)) return addLog('扩建材料不足：'+costText(up.cost));
-  pay(up.cost);
-  p.upg = {prog:0, total:up.time};
-  addLog('总统府开始扩建至 Lv'+(p.lv+1)+'（'+up.time+' 年）');
+  p.upg = newProject(Object.assign({},up.cost), up.time);
+  addLog('总统府扩建到 Lv'+(p.lv+1)+'：需要 '+costText(up.cost)+'，材料凑齐后开工。');
   render();
 }
 
@@ -827,21 +908,24 @@ function nextYear(){
     addLog('人口只剩 3 人，殖民地已经维持不下去——这一局结束了。');
   }
 
-  // 工地
+  // 工地：材料没齐就停着等，齐了才开始计工期
   S.cells.forEach((c,i)=>{
     if (!isWork(c)) return;
+    if (!c.stocked) return;
     c.prog++;
     if (c.prog >= c.total){
-      S.cells[i] = {kind:'b', type:c.type, lv:1, workers:0, limit:BUILD[c.type].post, upg:null};
+      S.cells[i] = {kind:'b', type:c.type, lv:1, workers:0, limit:BUILD[c.type].post, upg:null,
+                    invested:Object.assign({},BUILD[c.type].cost)};
       addLog('落成：'+BUILD[c.type].name+'（Lv1）。无业的人自己上工了。');
     }
   });
 
   // 建筑升级
   builtList().forEach(({b})=>{
-    if (!b.upg) return;
+    if (!b.upg || !b.upg.stocked) return;
     b.upg.prog++;
     if (b.upg.prog >= b.upg.total){
+      addInvested(b, b.upg.need);
       b.upg = null; b.lv++;
       b.limit = Math.min(Math.max(b.limit, posts(b)), maxLimit(b));
       addLog(BUILD[b.type].name+' 升到 Lv'+b.lv+(b.type==='house'?'，可住 '+houseCap(b)+' 人':''));
@@ -850,7 +934,7 @@ function nextYear(){
 
   // 总统府扩建
   const p = presCell();
-  if (p && p.upg){
+  if (p && p.upg && p.upg.stocked){
     p.upg.prog++;
     if (p.upg.prog >= p.upg.total){
       p.upg = null; p.lv++;
@@ -877,6 +961,9 @@ function nextYear(){
       addLog('没有伐木场，村民只能捡枯枝：木材每年最多 +3、存到 20 为止。先补一座伐木场（木 10）。');
     }
   }
+
+  // 材料分配：把库存按建造令顺序填进工地与升级项目（填满才开工）
+  fillProjects();
 
   // 吃饭
   const eat = S.pop*1;
@@ -979,14 +1066,25 @@ function viewMap(){
       if (!ks.length) return;
       bhtml += '<div class="cat">'+cat+'</div>';
       ks.forEach(k=>{
-        const d = BUILD[k], ok = unlocked(k), afford = canPay(d.cost);
+        const d = BUILD[k], ok = unlocked(k);
         bhtml += '<button class="bbtn '+(S.sel===k?'on':'')+'" onclick="selBuild(\''+k+'\')" '+
-                 ((ok&&afford)?'':'disabled')+'>'+
+                 (ok?'':'disabled')+'>'+
                  d.name + '<span class="cost">'+costText(d.cost)+'</span>'+
                  (!ok?('<div class="small muted">需总统府 Lv'+d.unlock+'</div>'):'')+
                  '</button>';
       });
     });
+    const q = S.cells.map((c,i)=> isWork(c)?{c:c,i:i}:null).filter(Boolean);
+    if (q.length){
+      bhtml += '<div class="cat">在建 / 等料</div>';
+      q.forEach(({c,i})=>{
+        bhtml += '<button class="bbtn" onclick="goDetail('+i+')">'+BUILD[c.type].name+
+                 '<span class="cost">'+projShort(c)+'</span>'+
+                 (c.stocked?('<div class="small muted">施工 '+c.prog+' / '+c.total+' 年</div>')
+                           :('<div class="small muted">材料不足，等着</div>'))+
+                 '</button>';
+      });
+    }
   }
 
   // 地图
@@ -999,11 +1097,11 @@ function viewMap(){
       gh += '<div class="cell empty t-'+t+(ok?' ok':'')+'" style="background:'+bg+'" onclick="cellClick('+i+')">'+
             '<span class="terr">'+TNAME[t]+'</span><span class="plus">'+(t==='river'?'':(S.started?'+':''))+'</span></div>';
     } else if (isWork(c)){
-      const nm = (c.prog===0?'':'')+BUILD[c.type].name;
+      const nm = BUILD[c.type].name;
       gh += '<div class="cell work" style="background:'+bg+'" onclick="cellClick('+i+')">'+
             '<span class="terr">'+TNAME[t]+'</span>'+
-            '<span class="nm">'+nm+'</span><span class="sub">工地 '+c.prog+'/'+c.total+'</span>'+
-            '<span class="p" style="width:'+(c.prog/c.total*100)+'%"></span></div>';
+            '<span class="nm">'+nm+'</span><span class="sub">'+(c.stocked?('工地 '+c.prog+'/'+c.total):projShort(c))+'</span>'+
+            '<span class="p" style="width:'+(c.stocked?(c.prog/c.total*100):0)+'%"></span></div>';
     } else if (isPres(c)){
       gh += '<div class="cell built" style="background:'+bg+'" onclick="cellClick('+i+')">'+
             '<span class="nm">总统府</span><span class="sub">Lv'+c.lv+(c.upg?' 扩建中':'')+'</span></div>';
@@ -1056,11 +1154,12 @@ function viewDetail(){
           '</span></div>'+
       '</div>'+
       '<div class="panel"><h3>扩建</h3>'+
-        (c.upg ? ('<div class="muted">扩建中 '+c.upg.prog+' / '+c.upg.total+' 年</div>') :
+        (c.upg ? ('<div class="small">'+projText(c.upg)+'</div>'+
+                  '<div class="muted small">'+(c.upg.stocked?('施工 '+c.upg.prog+' / '+c.upg.total+' 年'):'材料不足，等着')+'</div>'+
+                  '<div style="margin-top:8px"><button onclick="cancelUpgrade('+i+')">取消扩建（全额退回）</button></div>') :
         (up ? ('<div class="small">升到 Lv'+(c.lv+1)+'：'+costText(up.cost)+'　'+up.time+' 年<br>'+
                '<span class="muted">解锁 '+PRES_UNLOCK[c.lv+1]+'</span></div>'+
-               '<div style="margin-top:8px"><button class="primary" onclick="startPresUpgrade()" '+
-               (canPay(up.cost)?'':'disabled')+'>扩建到 Lv'+(c.lv+1)+'</button></div>')
+               '<div style="margin-top:8px"><button class="primary" onclick="startPresUpgrade()">扩建到 Lv'+(c.lv+1)+'</button></div>')
             : '<div class="muted">已是最高级。</div>'))+
       '</div>'+
     '</div>';
@@ -1069,9 +1168,11 @@ function viewDetail(){
 
   if (isWork(c)){
     h += '<div class="panel"><h3>'+BUILD[c.type].name+' · 工地</h3>'+
-      '<div class="rowline"><span class="lab">进度</span><span>'+c.prog+' / '+c.total+' 年</span></div>'+
+      '<div class="rowline"><span class="lab">材料</span><span>'+projText(c)+'</span></div>'+
+      '<div class="rowline"><span class="lab">状态</span><span>'+(c.stocked?('施工 '+c.prog+' / '+c.total+' 年'):'<span class="muted">材料不足，等着</span>')+'</span></div>'+
       '<div class="rowline"><span class="lab">工人</span><span>'+c.crew+' 人</span></div>'+
-      '<div class="muted small" style="margin-top:6px">建成前不产出。</div></div>';
+      '<div class="muted small" style="margin-top:6px">材料凑齐后才开始计工期；建成前不产出。</div>'+
+      '<div style="margin-top:10px"><button onclick="cancelSite('+i+')">取消建造（已投入材料全额退回）</button></div></div>';
     return h;
   }
 
@@ -1118,11 +1219,12 @@ function viewDetail(){
   const upc = upgradeCost(c);
   let upBox = '';
   if (c.lv>=3) upBox = '<div class="muted">已满级（Lv3）。</div>';
-  else if (c.upg) upBox = '<div class="muted">升级中 '+c.upg.prog+' / '+c.upg.total+' 年</div>';
+  else if (c.upg) upBox = '<div class="small">'+projText(c.upg)+'</div>'+
+    '<div class="muted small">'+(c.upg.stocked?('施工 '+c.upg.prog+' / '+c.upg.total+' 年'):'材料不足，等着')+'</div>'+
+    '<div style="margin-top:8px"><button onclick="cancelUpgrade('+i+')">取消升级（全额退回）</button></div>';
   else upBox = '<div class="small">升到 Lv'+(c.lv+1)+'：'+costText(upc)+'　'+d.time+' 年<br>'+
-    '<span class="muted">升级期间停产，用工上限同步提高'+(isHouse?'，床位 +'+houseCap({lv:c.lv+1})+'':'')+'</span></div>'+
-    '<div style="margin-top:8px"><button class="primary" onclick="startUpgrade(S.cells['+i+'])" '+
-    (canPay(upc)?'':'disabled')+'>升级到 Lv'+(c.lv+1)+'</button></div>';
+    '<span class="muted">升级期间停产，用工上限同步提高'+(isHouse?'，床位 +'+houseCap({lv:c.lv+1}):'')+'</span></div>'+
+    '<div style="margin-top:8px"><button class="primary" onclick="startUpgrade(S.cells['+i+'])">升级到 Lv'+(c.lv+1)+'</button></div>';
 
   let note = '';
   if (presLv()<2) note = '<div class="locknote">总统府升到 Lv2 后，这栋建筑才会有“负责人”这一席。制度还没定，先留空。</div>';
@@ -1131,7 +1233,12 @@ function viewDetail(){
   return h + '<div class="detail">'+left+
     '<div><div class="panel" style="margin-bottom:10px"><h3>升级</h3>'+upBox+'</div>'+
     right +
-    '<div class="panel" style="margin-top:10px">'+note+'</div></div></div>';
+    '<div class="panel" style="margin-top:10px">'+note+'</div>'+
+    '<div class="panel" style="margin-top:10px"><h3>拆除</h3>'+
+      '<div class="small">返还累计投入的 80%：<b>'+costText(refundPreview(c))+'</b></div>'+
+      '<div class="muted small">含升级投入。拆除后建筑消失，用工回到无业池。</div>'+
+      '<div style="margin-top:8px"><button onclick="demolish('+i+')">拆除'+d.name+'</button></div></div>'+
+    '</div></div>';
 }
 
 function viewMorale(){
