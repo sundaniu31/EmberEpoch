@@ -641,6 +641,11 @@ function pieHTML(title, items){
 
 // 有空岗就自动从无业池里补人（每年结算、以及玩家调完上限时各跑一次）
 function autoFill(){
+  // 工地优先：建造令已经下了，先把 2 个工人配齐，再谈别的
+  S.cells.forEach(c=>{
+    if (!isWork(c)) return;
+    while (c.crew < 2 && unemployed() > 0) c.crew++;
+  });
   builtList().forEach(x=>{
     const b = x.b, d = BUILD[b.type];
     if (!d.post) return;
@@ -729,6 +734,11 @@ function projShort(p){
   const ks = Object.keys(p.need).slice(0,2);
   return ks.map(r=>RESNAME[r]+' '+Math.round((p.paid[r]||0))+'/'+Math.round(p.need[r])).join(' ');
 }
+function siteStatus(c){
+  if (!c.stocked) return '材料不足，等着';
+  if (c.crew < 2) return '缺人手，等着';
+  return '施工 '+c.prog+' / '+c.total+' 年';
+}
 function addInvested(b, cost){
   b.invested = b.invested || {};
   Object.keys(cost).forEach(r=>{ b.invested[r] = (b.invested[r]||0) + cost[r]; });
@@ -799,10 +809,10 @@ function cellClick(i){
     const k = S.sel;
     if (S.cells[i]) return addLog('这块地已经占了。');
     if (!canPlace(k,i)) return addLog(placeReason(k,i));
-    if (unemployed() < 2) return addLog('没有无业人口开工（工地要 2 人）。');
-    S.cells[i] = Object.assign(newProject(Object.assign({},BUILD[k].cost), BUILD[k].time), {kind:'work', type:k, crew:2});
-    addLog('下达建造令：'+BUILD[k].name+'（需要 '+costText(BUILD[k].cost)+'，材料凑齐后才开始计工期）');
+    S.cells[i] = Object.assign(newProject(Object.assign({},BUILD[k].cost), BUILD[k].time), {kind:'work', type:k, crew:0});
+    addLog('下达建造令：'+BUILD[k].name+'（需要 '+costText(BUILD[k].cost)+'）。材料和人手会自动往里填。');
     S.sel = null;
+    autoFill();
     return render();
   }
   if (S.cells[i]) return goDetail(i);
@@ -1080,8 +1090,7 @@ function viewMap(){
       q.forEach(({c,i})=>{
         bhtml += '<button class="bbtn" onclick="goDetail('+i+')">'+BUILD[c.type].name+
                  '<span class="cost">'+projShort(c)+'</span>'+
-                 (c.stocked?('<div class="small muted">施工 '+c.prog+' / '+c.total+' 年</div>')
-                           :('<div class="small muted">材料不足，等着</div>'))+
+                 '<div class="small muted">'+(c.stocked&&c.crew>=2?('施工 '+c.prog+' / '+c.total+' 年'):siteStatus(c))+'</div>'+
                  '</button>';
       });
     }
@@ -1100,7 +1109,7 @@ function viewMap(){
       const nm = BUILD[c.type].name;
       gh += '<div class="cell work" style="background:'+bg+'" onclick="cellClick('+i+')">'+
             '<span class="terr">'+TNAME[t]+'</span>'+
-            '<span class="nm">'+nm+'</span><span class="sub">'+(c.stocked?('工地 '+c.prog+'/'+c.total):projShort(c))+'</span>'+
+            '<span class="nm">'+nm+'</span><span class="sub">'+(c.stocked&&c.crew>=2?('工地 '+c.prog+'/'+c.total):projShort(c))+'</span>'+
             '<span class="p" style="width:'+(c.stocked?(c.prog/c.total*100):0)+'%"></span></div>';
     } else if (isPres(c)){
       gh += '<div class="cell built" style="background:'+bg+'" onclick="cellClick('+i+')">'+
@@ -1169,8 +1178,8 @@ function viewDetail(){
   if (isWork(c)){
     h += '<div class="panel"><h3>'+BUILD[c.type].name+' · 工地</h3>'+
       '<div class="rowline"><span class="lab">材料</span><span>'+projText(c)+'</span></div>'+
-      '<div class="rowline"><span class="lab">状态</span><span>'+(c.stocked?('施工 '+c.prog+' / '+c.total+' 年'):'<span class="muted">材料不足，等着</span>')+'</span></div>'+
-      '<div class="rowline"><span class="lab">工人</span><span>'+c.crew+' 人</span></div>'+
+      '<div class="rowline"><span class="lab">状态</span><span>'+(c.stocked&&c.crew>=2?'施工 '+c.prog+' / '+c.total+' 年':'<span class="muted">'+siteStatus(c)+'</span>')+'</span></div>'+
+      '<div class="rowline"><span class="lab">工人</span><span>'+c.crew+' / 2 人</span></div>'+
       '<div class="muted small" style="margin-top:6px">材料凑齐后才开始计工期；建成前不产出。</div>'+
       '<div style="margin-top:10px"><button onclick="cancelSite('+i+')">取消建造（已投入材料全额退回）</button></div></div>';
     return h;
