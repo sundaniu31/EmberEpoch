@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>EmberEpoch · 殖民定居点原型</title>
-<meta name="description" content="EmberEpoch：殖民定居点自动化文明模拟 - 可玩原型。10 个拓殖者、7×7 荒地、六行业、人口队列模型与民意事件。">
+<meta name="description" content="EmberEpoch：殖民定居点自动化文明模拟 - 可玩原型。10 个拓殖者、9×14 荒野、六行业、人口队列模型与民意事件。">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#070d12">
 <style>
@@ -168,7 +168,16 @@
 
   /* ---------- 地图 ---------- */
   .board{padding-bottom:18px}
-  .grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;width:100%;max-width:560px;margin:0 auto;min-width:0}
+  .boardbox{overflow:auto;overflow-y:hidden;padding:2px 2px 6px;border-radius:12px;scrollbar-width:thin}
+  .grid{display:grid;grid-template-columns:repeat(var(--cols,7),minmax(0,1fr));gap:7px;
+        width:calc(100% * var(--zoom,1));min-width:0;transition:width .16s ease}
+  .zoomctl{display:inline-flex;gap:4px;margin-left:4px;vertical-align:middle}
+  .zoomctl button{font-size:11px;padding:4px 9px;border-radius:8px}
+  header .ctrls .seg{display:inline-flex;gap:2px;padding:3px;border-radius:10px;
+    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12)}
+  header .ctrls .seg button{padding:5px 10px;font-size:11px;border-radius:7px;background:transparent;
+    border:0;color:var(--ink2);letter-spacing:.02em}
+  header .ctrls .seg button.on{background:rgba(127,227,207,.22);color:#d9fff6}
   .cell{
     position:relative;display:flex;flex-direction:column;justify-content:center;align-items:center;
     aspect-ratio:1/1;min-height:52px;padding:4px;overflow:hidden;text-align:center;line-height:1.2;
@@ -296,7 +305,7 @@
     .board{order:1}
     .feed{order:2}
     .res{-webkit-mask-image:linear-gradient(90deg,#000 86%,transparent);mask-image:linear-gradient(90deg,#000 86%,transparent)}
-    .grid{max-width:100%;gap:6px}
+    .grid{gap:6px}
     .cell{min-height:44px;border-radius:11px}
     .cell .terr{display:none}
     .build .cat{display:none}
@@ -337,10 +346,13 @@
 // =====================================================================
 // 配置
 // =====================================================================
-const GRID = 7, SIZE = GRID*GRID;
-const TNAME = {grass:'空地', soil:'沃土', forest:'森林', coal:'煤矿', iron:'铁矿', river:'河流'};
-const THEX   = {grass:'rgba(126,168,120,.20)', soil:'rgba(190,178,104,.24)', forest:'rgba(78,150,110,.30)', coal:'rgba(120,130,145,.28)', iron:'rgba(176,120,96,.28)', river:'rgba(86,150,200,.32)'};
-const TWEIGHT = [['grass',30],['forest',20],['soil',10],['coal',13],['iron',13],['river',9]];
+const ROWS = 9, COLS = 14, SIZE = ROWS*COLS;
+const TNAME = {grass:'空地', soil:'沃土', forest:'森林', coal:'煤矿', iron:'铁矿', river:'河流', rock:'石山'};
+const THEX   = {grass:'rgba(126,168,120,.20)', soil:'rgba(190,178,104,.24)', forest:'rgba(78,150,110,.30)',
+                coal:'rgba(64,70,84,.50)', iron:'rgba(176,120,96,.28)', river:'rgba(86,150,200,.32)',
+                rock:'rgba(110,112,124,.38)'};
+// 每种地形的大致占比（生成器用它铺底，之后再做河流 / 山脉 / 森林团）
+const TWEIGHT = [['grass',34],['forest',22],['soil',12],['coal',9],['iron',9],['rock',8],['river',6]];
 const RESNAME = {food:'粮', wood:'木', coal:'煤', iron:'铁', money:'钱', knowledge:'学识'};
 // 效率曲线：用工 / 设计岗 → 效率%
 const CURVE = [[0.1,18],[0.5,60],[1,100],[1.33,118],[1.67,128],[2,132],[2.5,122]];
@@ -349,7 +361,7 @@ const BUILD = {
   house:  {name:'住宅', cat:'民生', post:0, unit:0, where:['grass'], cost:{wood:20}, time:1,
            cap:[10,20,30], desc:'住人，人口上限靠它'},
   farm:   {name:'农庄', cat:'生产', post:6, unit:2.5, out:'food',  where:['grass','soil'], cost:{wood:30}, time:2},
-  lumber: {name:'伐木场', cat:'生产', post:5, unit:2,   out:'wood',  where:['forest'], cost:{wood:10}, time:2},
+  lumber: {name:'伐木场', cat:'生产', post:5, unit:2,   out:'wood',  where:['forest'], cost:{wood:20}, time:2},
   mine:   {name:'矿场', cat:'生产', post:6, unit:1.5, out:'ore',   where:['coal','iron'], cost:{wood:20}, time:3},
   barracks:{name:'军营', cat:'军政', post:10, unit:0, where:['grass'], cost:{wood:40,iron:25}, time:3, unlock:3,
            desc:'不产出资源（战斗系统未做）'},
@@ -371,14 +383,97 @@ const PRES_UNLOCK = {2:'政体 ＋ 每栋建筑的负责人', 3:'军营', 4:'大
 let S = null, timer = null;
 
 function genTerrain(){
-  const a = [];
-  for (let i=0;i<SIZE;i++){
-    let r = Math.random()*100, acc = 0, t = 'grass';
-    for (const [k,w] of TWEIGHT){ acc += w; if (r < acc){ t = k; break; } }
-    a.push(t);
+  const a = new Array(SIZE).fill('grass');
+  const I = (r,c)=> r*COLS + c;
+  const inb = (r,c)=> r>=0 && r<ROWS && c>=0 && c<COLS;
+  const set = (r,c,t)=>{ if (inb(r,c)) a[I(r,c)] = t; };
+  // 从已有地块向外长，保证同类地块连成片，而不是随机撒点
+  const grow = (seeds, n, type, avoid)=>{
+    const frontier = seeds.slice();
+    let made = 0, guard = 0;
+    while (made < n && frontier.length && guard++ < 4000){
+      const i = frontier.splice(Math.floor(Math.random()*frontier.length), 1)[0];
+      for (const j of neigh(i)){
+        if (avoid && avoid.includes(a[j])) continue;
+        if (a[j] === type){ if (!frontier.includes(j)) frontier.push(j); continue; }
+        if (Math.random() < 0.45) continue;
+        a[j] = type; frontier.push(j); made++;
+        if (made >= n) break;
+      }
+    }
+    return made;
+  };
+
+  // 1) 河流：从左边缘走到右边缘。每列先落一格，再纵向挪动，保证与上一列相接
+  let r = 1 + Math.floor(Math.random()*(ROWS-2));
+  for (let c=0;c<COLS;c++){
+    set(r, c, 'river');
+    if (Math.random() < 0.22) set(r+1, c, 'river');      // 河面偶尔两格宽
+    let target = r + (Math.random()<0.36 ? (Math.random()<0.5?-1:1) : 0);
+    target = Math.max(0, Math.min(ROWS-1, target));
+    while (r !== target){
+      r += Math.sign(target - r);
+      set(r, c, 'river');
+    }
   }
-  const ensure = (k,n)=>{ while (a.filter(x=>x===k).length < n) a[Math.floor(Math.random()*SIZE)] = k; };
-  ensure('forest',4); ensure('coal',3); ensure('iron',3); ensure('soil',2); ensure('grass',8);
+
+  // 2) 河岸冲积：紧贴河水的地有一半变沃土，沿河形成一条可耕带
+  for (let rr=0;rr<ROWS;rr++) for (let cc=0;cc<COLS;cc++){
+    if (a[I(rr,cc)] !== 'river') continue;
+    [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr,dc])=>{
+      const nr=rr+dr, nc=cc+dc;
+      if (inb(nr,nc) && a[I(nr,nc)]==='grass' && Math.random()<0.45) a[I(nr,nc)]='soil';
+    });
+  }
+
+  // 3) 石山：离边缘至少 3 格的中心，铺一个半径 2 的圆，再向外延伸几格
+  const cr = 3 + Math.floor(Math.random()*Math.max(1, ROWS-6));
+  const cc = 3 + Math.floor(Math.random()*Math.max(1, COLS-6));
+  for (let dr=-2;dr<=2;dr++) for (let dc=-2;dc<=2;dc++){
+    if (dr*dr + dc*dc > 6) continue;
+    if (a[I(cr+dr, cc+dc)] !== 'river') set(cr+dr, cc+dc, 'rock');
+  }
+  grow([I(cr,cc)], 6, 'rock', ['river']);
+
+  // 4) 矿脉：在山体里挖煤和铁，各 5~6 格
+  const vein = (type, n)=>{
+    let made = 0, guard = 0;
+    while (made < n && guard++ < 300){
+      const rocks = [];
+      for (let i=0;i<SIZE;i++) if (a[i]==='rock') rocks.push(i);
+      if (!rocks.length) break;
+      const i = rocks[Math.floor(Math.random()*rocks.length)];
+      a[i] = type; made++;
+      neigh(i).filter(j=>a[j]==='rock').slice(0, 2).forEach(j=>{ a[j]=type; made++; });
+    }
+    return made;
+  };
+  vein('coal', 6); vein('iron', 6);
+
+  // 5) 森林：3 片，每片 7~10 格，避开河与山
+  for (let b=0;b<3;b++){
+    let sr, sc, seed, guard = 0;
+    do { sr = Math.floor(Math.random()*ROWS); sc = Math.floor(Math.random()*COLS); seed = I(sr,sc); }
+    while (a[seed] !== 'grass' && guard++ < 50);
+    if (a[seed] !== 'grass') continue;
+    a[seed] = 'forest';
+    grow([seed], 6 + Math.floor(Math.random()*3), 'forest', ['river','rock','coal','iron','soil']);
+  }
+
+  // 6) 保底（只沿着同类地块继续长，绝不随机撒点）
+  const count = t => a.filter(x=>x===t).length;
+  const topUp = (t, n, avoid)=>{
+    let guard = 0;
+    while (count(t) < n && guard++ < 30){
+      const seeds = a.map((x,i)=> x===t?i:-1).filter(i=>i>=0);
+      if (!seeds.length) break;
+      grow([seeds[Math.floor(Math.random()*seeds.length)]], n-count(t), t, avoid);
+    }
+  };
+  topUp('forest', 16, ['river','rock','coal','iron','soil']);
+  topUp('soil', 10, ['river','rock','coal','iron']);
+  if (count('coal') < 5) vein('coal', 3);
+  if (count('iron') < 5) vein('iron', 3);
   return a;
 }
 // 拓殖期：前 20 年（开荒保护 + 移民敞开）
@@ -396,6 +491,8 @@ function newGame(){
     cells: new Array(SIZE).fill(null),
     morale, debuff:{}, cd:3,
     lifeMod:0,                       // 预期寿命修正：医药、粮食、住房等以后往这里加
+    noFuel:false, warnedFuel:false,
+    speed:1, zoom:0,                 // zoom=0 表示"自动铺满"；>1 则按倍数放大并可滚动
     sel:null, log:[]
   };
   addLog('先在地图上点一块空地，放下总统府。');
@@ -419,11 +516,11 @@ function curveVal(x){
   return CURVE[CURVE.length-1][1];
 }
 function neigh(i){
-  const x=i%GRID, y=Math.floor(i/GRID), out=[];
+  const x=i%COLS, y=Math.floor(i/COLS), out=[];
   if (x>0) out.push(i-1);
-  if (x<GRID-1) out.push(i+1);
-  if (y>0) out.push(i-GRID);
-  if (y<GRID-1) out.push(i+GRID);
+  if (x<COLS-1) out.push(i+1);
+  if (y>0) out.push(i-COLS);
+  if (y<ROWS-1) out.push(i+COLS);
   return out;
 }
 function adjCount(i, terr){ return neigh(i).filter(j=>S.terrain[j]===terr).length; }
@@ -441,6 +538,12 @@ function posts(b){
   const d = BUILD[b.type];
   if (!d.post) return 0;
   return Math.round(d.post*(1+0.5*(b.lv-1)));
+}
+// 每升一级，单个岗位的产量 +10%（除了加岗，还有一点点"技术进步"）
+const LV_UNIT = 0.10;
+function unitAt(b){
+  const d = BUILD[b.type];
+  return d.unit ? d.unit*(1 + LV_UNIT*(b.lv-1)) : 0;
 }
 function maxLimit(b){
   const p = posts(b);
@@ -467,16 +570,22 @@ function siteBonus(b){
   const i = cellIndex(b);
   const cap = x => Math.min(1.40, x);
   if (b.type==='farm')   return S.terrain[i]==='soil' ? 1.25 : 1.0;
-  if (b.type==='lumber') return cap(1 + 0.10*adjCount(i,'forest'));
-  if (b.type==='mine')   return cap(1 + 0.10*adjCount(i,S.terrain[i]));
+  if (b.type==='lumber'){ const n = adjCount(i,'forest'); return n===0 ? 0.60 : cap(1 + 0.10*n); }
+  if (b.type==='mine'){   const n = adjCount(i,S.terrain[i]); return n===0 ? 0.60 : cap(1 + 0.10*n); }
   return 1;
+}
+// 维护燃料：Lv2 每年 1 煤、Lv3 每年 2 煤。缺煤则升级过的建筑半开工
+function fuelNeed(){
+  return builtList().reduce((s,{b})=> s + (b.lv>=2 ? (b.lv-1) : 0), 0);
 }
 function outputOf(b){
   const d = BUILD[b.type];
   if (!d.unit) return 0;
   if (effOf(b)<=0) return 0;
-  const raw = posts(b)*d.unit*(effOf(b)/100)*moodCoeff(b.type)*evMult(b.type)*siteBonus(b)*knowBonus();
-  return Math.min(raw, posts(b)*d.unit*3);   // 硬上限：单岗不超过基准的 3 倍
+  const u = unitAt(b);
+  const fuel = (S.noFuel && b.lv>=2) ? 0.75 : 1;
+  const raw = posts(b)*u*(effOf(b)/100)*moodCoeff(b.type)*evMult(b.type)*siteBonus(b)*knowBonus()*fuel;
+  return Math.min(raw, posts(b)*u*3);   // 硬上限：单岗不超过当前等级基准的 3 倍
 }
 function marginalPct(b){
   const p = posts(b);
@@ -490,6 +599,16 @@ function beds(){
   let n = 10; // 总统府自带 10 个床位（开局那十个人）
   builtList().forEach(x=>{ if (x.b.type==='house') n += houseCap(x.b); });
   return n;
+}
+// 床位对生育的压制：住房是生育的硬前提，挤不下就不生
+// 空床 ≥2 → 1.00；1 → 0.70；0 → 0.35；超员 1~2 → 0.15；超员 ≥3 → 0
+function bedFactor(){
+  const f = beds() - S.pop;
+  if (f >= 2) return 1.00;
+  if (f === 1) return 0.70;
+  if (f === 0) return 0.35;
+  if (f >= -2) return 0.15;
+  return 0;
 }
 function workCrews(){ return S.cells.reduce((s,c)=> s + (isWork(c) ? c.crew : 0), 0); }
 function employed(){ return builtList().reduce((s,x)=> s + x.b.workers, 0); }
@@ -589,20 +708,20 @@ function demogYear(surplus){
   // 出生：育龄女性 × 生育率 × 三个修正
   const women = S.demog.f[1] + S.demog.f[2];
   const foodK = surplus >= 1 ? 1.0 : (surplus >= 0 ? 0.6 : (S.res.food > 0 ? 0.2 : 0));
-  const bedK  = S.pop < beds() ? 1.0 : 0.35;
+  const bedK  = bedFactor();
   const moodK = 0.7 + 0.6*(avgMorale()/100);
   let births = ofType('farm').length ? women * FERT * foodK * bedK * moodK : 0;
   S.demog.m[0] += births/2; S.demog.f[0] += births/2;
 
-  // 迁入：拓殖期（前 20 年）敞开收人，之后逐年收紧
+  // 迁入：看"有空床 + 有粮 + 民意"，不看空缺岗位——拓荒者是先来人、再找活干
   let imm = 0;
   const vac = vacancies(), freeBeds = beds() - S.pop;
   const pioneer = S.t <= PIONEER_YEARS;
   const wave = pioneer || S.t % 2 === 0;                       // 拓殖期每年一批，之后隔年
   const cap  = pioneer ? 10 : (S.t <= 50 ? 4 : 3);             // 每批上限
   const need = pioneer ? 45 : 50;                              // 拓殖期民意门槛更低
-  if (wave && surplus >= 1 && vac >= 2 && freeBeds >= 2 && avgMorale() >= need){
-    imm = Math.min(Math.round((pioneer ? 3 : 2) + vac/3), freeBeds, cap);
+  if (wave && surplus >= 1 && freeBeds >= 3 && avgMorale() >= need){
+    imm = Math.min(Math.round((pioneer ? 3 : 2) + vac/2), freeBeds - 1, cap);
     const a = [imm*0.10, imm*0.55, imm*0.30, imm*0.05, 0];
     for (let i=0;i<5;i++){ S.demog.m[i] += a[i]/2; S.demog.f[i] += a[i]/2; }
   }
@@ -676,11 +795,13 @@ function placeReason(k,i){
   return BUILD[k].name+'只能建在'+BUILD[k].where.map(x=>TNAME[x]).join(' / ')+'上';
 }
 function upgradeCost(b){
+  // 升级比新建贵：每岗 1.5×（Lv2）/ 2.0×（Lv3），但省下一格地
   const base = BUILD[b.type].cost, c = {};
-  const f = Math.pow(1.5, b.lv);
-  for (const r in base) c[r] = Math.round(base[r]*f);
+  const f = b.lv === 1 ? 0.75 : 1.0;
+  for (const r in base) c[r] = Math.max(1, Math.round(base[r]*f));
   return c;
 }
+function upgradeYears(b){ return BUILD[b.type].time + b.lv; }
 function costText(c){ const k = Object.keys(c); return k.length ? k.map(r=>RESNAME[r]+c[r]).join(' ') : '免费'; }
 function canPay(c){ for (const r in c) if (S.res[r] < c[r]) return false; return true; }
 function pay(c){ for (const r in c) S.res[r] -= c[r]; }
@@ -779,15 +900,23 @@ function cancelUpgrade(i){
 
 // =====================================================================
 // 时间
+// 1 年 = 2000ms ÷ 倍速；慢速用来读奏报，快速用来滚过平淡年份
 // =====================================================================
+const YEAR_MS = 2000;
+function yearMs(){ return Math.round(YEAR_MS / (S.speed||1)); }
 function toggleTime(){ if (!S.started) return; S.running ? pauseTime() : startTime(); }
 function startTime(){
   if (timer || !S.started) return;
-  S.running = true; timer = setInterval(nextYear, 3000); render();
+  S.running = true; timer = setInterval(nextYear, yearMs()); render();
 }
 function pauseTime(){
   if (timer){ clearInterval(timer); timer = null; }
   S.running = false; render();
+}
+function setSpeed(v){
+  S.speed = v;
+  if (timer){ clearInterval(timer); timer = setInterval(nextYear, yearMs()); }
+  render();
 }
 
 // =====================================================================
@@ -835,7 +964,7 @@ function setLimit(b, v){
 function startUpgrade(b){
   if (!isBuilt(b) || b.lv>=3 || b.upg) return;
   const c = upgradeCost(b);
-  b.upg = newProject(c, BUILD[b.type].time);
+  b.upg = newProject(c, upgradeYears(b));
   addLog(BUILD[b.type].name+' 升级到 Lv'+(b.lv+1)+'：需要 '+costText(c)+'，材料凑齐后开工。');
   render();
 }
@@ -955,6 +1084,20 @@ function nextYear(){
   // 自动上工
   autoFill();
 
+  // 维护燃料：升级过的建筑要烧煤，煤不够就只能半开工
+  const needFuel = fuelNeed();
+  S.noFuel = false;
+  if (needFuel > 0){
+    if (S.res.coal >= needFuel) S.res.coal -= needFuel;
+    else {
+      S.noFuel = true;
+      if (!S.warnedFuel){
+        S.warnedFuel = true;
+        addLog('煤不够烧了：升级过的建筑只能半开工（效率 −25%）。要么补矿场，要么把等级降回来。');
+      }
+    }
+  }
+
   // 产出
   let producedFood = 0;
   builtList().forEach(({b})=>{
@@ -1043,7 +1186,8 @@ function render(){
     '<div class="ctrls">' +
       '<button class="primary" onclick="toggleTime()" '+(S.started?'':'disabled')+'>'+(S.running?'⏸ 暂停':'▶ 开始')+'</button>' +
       '<button onclick="if(S.started&&!S.running)nextYear()">⏭ 下一年</button>' +
-      '<span class="small muted">'+(S.running?'3 秒 / 年':(S.started?'已暂停':''))+'</span>' +
+      '<span class="seg">'+[1,2,4].map(v=>'<button class="'+(S.speed===v?'on':'')+'" onclick="setSpeed('+v+')">'+v+'×</button>').join('')+'</span>' +
+      '<span class="small muted">'+(S.running?(yearMs()/1000).toFixed(yearMs()%1000?1:0)+' 秒 / 年':(S.started?'已暂停':''))+'</span>' +
     '</div>';
 
   document.getElementById('hRes').innerHTML =
@@ -1104,11 +1248,10 @@ function viewMap(){
     if (!c){
       const ok = S.started && S.sel && canPlace(S.sel,i);
       gh += '<div class="cell empty t-'+t+(ok?' ok':'')+'" style="background:'+bg+'" onclick="cellClick('+i+')">'+
-            '<span class="terr">'+TNAME[t]+'</span><span class="plus">'+(t==='river'?'':(S.started?'+':''))+'</span></div>';
+            '<span class="terr">'+TNAME[t]+'</span><span class="plus">'+((t==='river'||t==='rock')?'':(S.started?'+':''))+'</span></div>';
     } else if (isWork(c)){
       const nm = BUILD[c.type].name;
       gh += '<div class="cell work" style="background:'+bg+'" onclick="cellClick('+i+')">'+
-            '<span class="terr">'+TNAME[t]+'</span>'+
             '<span class="nm">'+nm+'</span><span class="sub">'+(c.stocked&&c.crew>=2?('工地 '+c.prog+'/'+c.total):projShort(c))+'</span>'+
             '<span class="p" style="width:'+(c.stocked?(c.prog/c.total*100):0)+'%"></span></div>';
     } else if (isPres(c)){
@@ -1118,7 +1261,6 @@ function viewMap(){
       const sub = c.type==='house' ? ('住 '+houseCap(c)) :
                   (posts(c) ? (c.workers+'/'+(c.limit||posts(c))) : '—');
       gh += '<div class="cell built" style="background:'+bg+'" onclick="cellClick('+i+')">'+
-            '<span class="terr">'+TNAME[t]+'</span>'+
             '<span class="nm">'+BUILD[c.type].name+'</span><span class="sub">Lv'+c.lv+' '+sub+'</span></div>';
     }
   }
@@ -1129,13 +1271,20 @@ function viewMap(){
 
   return '<div class="mapwrap">'+
     '<div class="panel build"><h3>建造</h3><div class="buildlist">'+bhtml+'</div></div>'+
-    '<div class="panel board"><h3>领地　<button onclick="newGame()" style="font-size:11px;padding:5px 10px;letter-spacing:.02em">随机地图 ⟲</button></h3>'+
-      '<div class="grid">'+gh+'</div>'+
+    '<div class="panel board"><h3>领地'+
+      '<span class="zoomctl">'+
+        '<button onclick="zoomBy(-0.25)" title="缩小">−</button>'+
+        '<button onclick="zoomBy(0.25)" title="放大">＋</button>'+
+        '<button onclick="zoomFit()" title="整张地图放进屏幕">适应</button>'+
+      '</span>'+
+      '<button onclick="newGame()" style="font-size:11px;padding:5px 10px;letter-spacing:.02em">随机地图 ⟲</button></h3>'+
+      '<div class="boardbox"><div class="grid" style="--cols:'+COLS+';--zoom:'+zoomVal()+'">'+gh+'</div></div>'+
       '<div class="legend">'+
         '<i style="background:rgba(126,168,120,.55)"></i>空地'+
         '<i style="background:rgba(190,178,104,.55)"></i>沃土'+
         '<i style="background:rgba(78,150,110,.65)"></i>森林'+
-        '<i style="background:rgba(120,130,145,.65)"></i>煤矿'+
+        '<i style="background:rgba(110,112,124,.75)"></i>石山'+
+        '<i style="background:rgba(64,70,84,.85)"></i>煤矿'+
         '<i style="background:rgba(176,120,96,.65)"></i>铁矿'+
         '<i style="background:rgba(86,150,200,.65)"></i>河流</div>'+
       '<div class="small muted" style="margin-top:10px;text-align:center">'+hint+'</div>'+
@@ -1144,6 +1293,12 @@ function viewMap(){
       (S.log.length? S.log.map(x=>'<div>'+x+'</div>').join('') : '<div class="muted">（尚无奏报）</div>')+
     '</div></div>';
 }
+function zoomVal(){ return S.zoom || (window.innerWidth <= 860 ? 2.2 : 1); }
+function zoomBy(d){
+  const z = Math.max(1, Math.min(3, Math.round((zoomVal()+d)*4)/4));
+  S.zoom = z; render();
+}
+function zoomFit(){ S.zoom = 1; render(); }
 
 function viewDetail(){
   if (S.detail===null || !S.cells[S.detail]) return '<div class="panel"><div class="empty-note">没有选中建筑。</div></div>';
@@ -1259,6 +1414,7 @@ function viewMorale(){
       '<div><div class="v">'+employed()+'</div><div class="l">在岗</div></div>'+
       '<div><div class="v">'+workCrews()+'</div><div class="l">工地</div></div>'+
       '<div><div class="v">'+unemployed()+'</div><div class="l">无业</div></div>'+
+      '<div><div class="v"'+(bedFactor()<1?' style="color:var(--warn)"':'')+'>×'+bedFactor().toFixed(2)+'</div><div class="l">生育系数</div></div>'+
       '<div><div class="v">'+lifeExpectancy().toFixed(1)+'</div><div class="l">预期寿命</div></div>'+
     '</div>'+
     '<div class="pies">'+
@@ -1272,7 +1428,8 @@ function viewMorale(){
       '① <b>老化</b>：每个 15 年年龄桶每年有 1/15 的人流入下一个桶（15 年后 0–14 全变 15–29）；<br>'+
       '② <b>死亡</b>：分年龄死亡率 0–14 3.5%、15–29 1.0%、30–44 1.4%、45–59 2.8%、60+ 10%（古代水平）；<br>'+
       '③ <b>出生</b>：15–44 岁女性人数 × <b>0.15</b>（TFR≈4.5）× 粮食修正 × 床位修正 × 民意修正；没农庄就不生；<br>'+
-      '④ <b>迁入</b>：有余粮、空岗 ≥ 2、空床 ≥ 2、平均民意 ≥ 45 时来人。<b>前 20 年是拓殖期</b>，每年一批最多 10 人，且士气保底 55、积怨封顶 25（不会触发负面事件）；之后隔年一批，上限降到 3–4 人；<br>'+
+      '　　<b>床位修正（住房是生育的硬前提）</b>：空床 ≥2 → ×1.00，空床 1 → ×0.70，正好满床 → ×0.35，超员 1–2 人 → ×0.15，超员 ≥3 人 → ×0。当前 <b>×'+bedFactor().toFixed(2)+'</b>，所以不盖住宅就等于把人口锁死；<br>'+
+      '④ <b>迁入</b>：有余粮、空床 ≥ 3、平均民意 ≥ 45 时来人（不看空岗，先来人再找活）。<b>前 20 年是拓殖期</b>，每年一批最多 10 人，且士气保底 55、积怨封顶 25（不会触发负面事件）；之后隔年一批，上限降到 3–4 人；<br>'+
       '⑤ 人口 = 上面几项相加后四舍五入，硬上限 300。<br>'+
       '⑥ <b>预期寿命</b>由当前分年龄死亡率反推，现在是 '+lifeExpectancy().toFixed(0)+
       ' 岁（被儿童夭折率拉低）。以后医药、粮食、住房只改 <code>寿命修正</code> 一个数。'+
