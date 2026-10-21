@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>国际市场模拟 Demo · 灰烬纪元原型</title>
+<style>
+:root{
+  --bg:#141713; --panel:#1c211c; --panel2:#232a23; --line:#33402f;
+  --txt:#dfe6dc; --mut:#8a978a; --acc:#7fa86b; --warn:#c9a227; --bad:#c2604a; --good:#6fa87b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding:14px}
+.wrap{max-width:1280px;margin:0 auto}
+h1{font-size:17px;font-weight:600;letter-spacing:.5px}
+h1 span{color:var(--mut);font-size:12px;font-weight:400;margin-left:8px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:12px}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.col{flex:1;min-width:300px}
+.hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+/* 顶部资产 */
+.assets{display:flex;gap:18px;flex-wrap:wrap;font-size:13px}
+.assets div b{font-size:17px;font-weight:600;display:block}
+.assets .coin b{color:var(--warn)}
+.mut{color:var(--mut)}
+/* 商品卡 */
+.goods{display:flex;gap:10px;flex-wrap:wrap}
+.good{flex:1;min-width:150px;background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px;cursor:pointer;transition:.15s}
+.good:hover{border-color:var(--acc)}
+.good.on{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc) inset}
+.good .nm{font-weight:600;font-size:15px}
+.good .pr{font-size:20px;font-weight:600;margin:2px 0}
+.up{color:#d8695a}.down{color:#5aa06a}.flat{color:var(--mut)}
+.good .sub{font-size:11px;color:var(--mut)}
+.mini{height:26px;margin-top:4px}
+/* 图表 */
+#chart{width:100%;height:190px;background:var(--panel2);border:1px solid var(--line);border-radius:7px;display:block}
+/* 交易面板 */
+.trade{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.trade input,.trade select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:5px;padding:7px 9px;font-size:13px}
+.trade input{width:90px}
+button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:5px;padding:7px 13px;cursor:pointer;font-size:13px;transition:.15s}
+button:hover{border-color:var(--acc);color:#fff}
+button.primary{background:var(--acc);border-color:var(--acc);color:#111;font-weight:600}
+button.primary:hover{background:#8fbb79;color:#111}
+button.sell{background:#7a3f34;border-color:#8f4a3c}
+button.buy{background:#3a5a3f;border-color:#456b4b}
+/* 国家卡 */
+.ctry{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:10px;margin-bottom:8px}
+.ctry .top{display:flex;justify-content:space-between;align-items:center}
+.ctry .nm{font-weight:600}
+.ctry .ty{font-size:11px;color:var(--mut);border:1px solid var(--line);border-radius:3px;padding:1px 6px}
+.ctry .stk{font-size:12px;color:var(--mut);margin-top:4px}
+.ctry .ord{font-size:12px;margin-top:5px;display:flex;gap:10px;flex-wrap:wrap}
+.ord .b{color:#d8695a}.ord .s{color:#5aa06a}
+.evt{display:inline-block;font-size:11px;background:rgba(194,96,74,.18);color:#e0917f;border:1px solid #6e3a2e;border-radius:3px;padding:1px 6px;margin-left:6px}
+.evt.good{background:rgba(111,168,123,.15);color:#9bd0a9;border-color:#3d6b47}
+.evt.war{background:rgba(201,162,39,.16);color:#ddc06a;border-color:#6d5a20}
+/* 日志 */
+.log{max-height:280px;overflow-y:auto;font-size:12px;line-height:1.75}
+.log div{padding:2px 0;border-bottom:1px solid rgba(51,64,47,.4)}
+.log .y{color:var(--mut);margin-right:6px}
+.tag{font-size:11px;padding:1px 6px;border-radius:3px;margin-right:5px}
+.tag.e{background:rgba(194,96,74,.2);color:#e0917f}
+.tag.w{background:rgba(201,162,39,.18);color:#ddc06a}
+.tag.g{background:rgba(111,168,123,.15);color:#9bd0a9}
+.tag.t{background:rgba(127,168,107,.15);color:#a8c99a}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+th,td{text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mut);font-weight:500}
+.hint{font-size:11px;color:var(--mut);margin-top:8px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="hdr">
+      <h1>国际市场模拟 Demo<span>灰烬纪元 · 冷兵器时代 · 现货交易原型</span></h1>
+      <div>
+        <button class="primary" onclick="nextYear()">⏭ 下一年</button>
+        <button onclick="runYears(5)">▶▶ 跑 5 年</button>
+        <button onclick="runYears(20)">▶▶▶ 跑 20 年</button>
+        <button onclick="init()">↻ 重置</button>
+      </div>
+    </div>
+    <div class="assets" id="assets"></div>
+  </div>
+
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <div class="hdr"><b>商品价格</b><span class="mut" id="yr"></span></div>
+        <div class="goods" id="goods"></div>
+        <canvas id="chart"></canvas>
+      </div>
+      <div class="card">
+        <div class="hdr"><b>交易</b><span class="mut" id="selinfo"></span></div>
+        <div class="trade">
+          <select id="tGood" onchange="render()"></select>
+          <input type="number" id="tQty" value="50" min="1">
+          <button onclick="setMax()">最大</button>
+          <button class="buy" onclick="doBuy()">买入</button>
+          <button class="sell" onclick="doSell()">卖出</button>
+        </div>
+        <div class="hint" id="tradeHint"></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <div class="hdr"><b>AI 国家（4）</b><span class="mut">挂单即需求 · 有收购上限</span></div>
+        <div id="countries"></div>
+      </div>
+      <div class="card">
+        <div class="hdr"><b>纪事</b></div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hdr"><b>机制说明</b></div>
+    <div class="hint">
+      <b>价格</b> = 基准价 × (需求/供给)^弹性 × 事件乘数，且<b>单年涨跌限速 ±25%</b>（价格不会瞬移，才有趋势可读）。<br>
+      <b>你卖得多 → 供给↑ → 跌价</b>：先被各国买单按上限吸收，超出部分砸向市场，成交均价随量递减（滑点）。<br>
+      <b>收购上限</b>：每个国家每年的买入量受预算与国别上限约束，不是无限收。<br>
+      <b>事件</b>：饥荒（粮产锐减→抢购→粮价涨）、战争（矿/粮军需暴增→暴涨）、丰收（粮价跌）、瘟疫（全面需求萎缩）、矿脉枯竭（矿价长期涨）、商路封锁（供给受阻→全涨）。
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ 常量 ============
+const GOODS = {
+  grain:{name:'粮', P0:1.0, elastic:0.6, color:'#c9a227'},
+  wood :{name:'木', P0:1.2, elastic:0.8, color:'#7fa86b'},
+  ore  :{name:'矿', P0:2.5, elastic:1.3, color:'#8fa8c0'}
+};
+const GKEYS = Object.keys(GOODS);
+const DEPTH = 60;   // 市场深度：滑点按"相对此基数"计算，而非绝对数量
+
+// 国家类型：产什么、刚性需求什么、人格
+// 产出/需求经平衡：三种商品的 需求/供给 都落在 0.75~1.05，价格围绕基准价波动
+const TYPES = {
+  farm  :{name:'农业型', produce:{grain:165}, need:{ore:25,wood:45}, note:'粮仓，缺矿缺木'},
+  forest:{name:'林业型', produce:{wood:120},  need:{grain:45,ore:15}, note:'木材出口，粮是刚需'},
+  mine  :{name:'矿产型', produce:{ore:105},   need:{grain:55,wood:40,ore:20}, note:'矿产出口，自身也耗矿'},
+  military:{name:'军事型',produce:{grain:30}, need:{grain:60,ore:45,wood:30}, note:'军需大户，战时暴涨'}
+};
+const TKEYS = Object.keys(TYPES);
+
+// 事件定义
+// target：事件只对合适的国家生效（否则打在无效目标上毫无反应）
+const EVENTS = [
+  {id:'famine', nm:'饥荒', cls:'e', dur:[2,4], w:24, target:c=>c.type==='farm',
+   desc:c=>c+' 遭遇大旱，粮产锐减，开始四处抢粮',
+   on:c=>{ c.mult.grain = 0.35; }},
+  {id:'war', nm:'战争', cls:'war', dur:[3,6], w:26, target:c=>true,
+   desc:c=>c+' 宣战，兵器与粮草需求暴增',
+   on:c=>{ c.war = true; c.needMul.ore = 1.9; c.needMul.grain = 1.6; }},
+  {id:'harvest', nm:'丰收', cls:'g', dur:[1,2], w:14, target:c=>c.type==='farm',
+   desc:c=>c+' 风调雨顺，粮仓满溢，粮价应声下跌',
+   on:c=>{ c.mult.grain = 1.6; }},
+  {id:'plague', nm:'瘟疫', cls:'e', dur:[2,3], w:12, target:c=>true,
+   desc:c=>c+' 疫病横行，百业萧条，需求全面萎缩',
+   on:c=>{ c.needAll = 0.6; }},
+  {id:'deplete', nm:'矿脉枯竭', cls:'w', dur:[5,8], w:14, target:c=>c.type==='mine',
+   desc:c=>c+' 主矿脉见底，产矿量腰斩',
+   on:c=>{ c.mult.ore = 0.45; }},
+  {id:'blockade', nm:'商路封锁', cls:'w', dur:[2,4], w:10, target:c=>true,
+   desc:c=>c+' 封锁商路，外运货物锐减',
+   on:c=>{ c.exportMul = 0.45; }}
+];
+// 加权随机
+function pickW(arr){
+  const tot = arr.reduce((s,e)=>s+e.w,0);
+  let r = Math.random()*tot;
+  for(const e of arr){ r -= e.w; if(r<=0) return e; }
+  return arr[arr.length-1];
+}
+
+// ============ 状态 ============
+let S;
+const SYL = ['阿','卡','德','维','兰','瑟','诺','米','尔','图','玛','萨','顿','瑞','洛','格','乌','奈'];
+const pick = a=>a[Math.floor(Math.random()*a.length)];
+const genName = ()=>pick(SYL)+pick(SYL)+pick(SYL);
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+
+function init(){
+  S = {
+    year:1,
+    price:{grain:1.0, wood:1.2, ore:2.5},
+    prev:{grain:1.0, wood:1.2, ore:2.5},
+    hist:{grain:[1.0], wood:[1.2], ore:[2.5]},
+    player:{coin:600, stock:{grain:100, wood:100, ore:50},
+            produce:{grain:60, wood:40, ore:20}, consume:{grain:30}},
+    countries:[],
+    events:[],
+    log:[]
+  };
+  // 生成 4 个国家（保证四种类型各一，且主产互补）
+  TKEYS.forEach((t,i)=>{
+    const tp = TYPES[t];
+    S.countries.push({
+      id:i, name:genName(), type:t, tname:tp.name,
+      stock:{grain:120, wood:120, ore:60},
+      coin:3000,
+      produce:Object.assign({},tp.produce),
+      need:Object.assign({},tp.need),
+      mult:{}, needMul:{}, needAll:1, exportMul:1, war:false,
+      orders:{buy:{}, sell:{}},
+      evt:null, evtLeft:0,
+      capBuy:110, capSell:130      // 收购/抛售上限
+    });
+  });
+  addLog('开局：四国初立，商路初通。你有 600 金币与一批存货。','t');
+  // 开局先跑 3 年 warm-up，让价格跑到均衡
+  for(let i=0;i<3;i++) tick(true);
+  addLog('—— 市场已趋稳，你可以开始交易了 ——','t');
+  render();
+}
+
+// ============ 年度循环 ============
+function tick(silent){
+  S.year++;
+  S.prev = Object.assign({},S.price);
+
+  // 1. 事件倒计时 / 结束
+  S.events = S.events.filter(e=>{
+    e.left--;
+    if(e.left<=0){ e.off(); addLog('【'+e.nm+'】'+e.cn+' 的影响已经过去。','g'); return false; }
+    return true;
+  });
+
+  // 2. 新事件（每年 22% 概率）
+  if(Math.random()<0.22){
+    const def = pickW(EVENTS);
+    const c = pick(S.countries.filter(x=>!x.evt && def.target(x)));
+    if(c){
+      // 重置修正
+      c.mult={}; c.needMul={}; c.needAll=1; c.exportMul=1; c.war=false;
+      def.on(c);
+      const e = {nm:def.nm, cn:c.name, left:def.dur[0]+Math.floor(Math.random()*(def.dur[1]-def.dur[0]+1)),
+                 off:()=>{ c.mult={}; c.needMul={}; c.needAll=1; c.exportMul=1; c.war=false; c.evt=null; }};
+      c.evt = def.nm; S.events.push(e);
+      addLog('【'+def.nm+'】'+def.desc(c.name)+'（约 '+e.left+' 年）', def.cls);
+    }
+  }
+
+  // 3. 各国：生产 → 消费 → 挂单
+  S.countries.forEach(c=>{
+    c.orders = {buy:{}, sell:{}};
+    GKEYS.forEach(g=>{
+      // 生产
+      const out = Math.round((c.produce[g]||0) * (c.mult[g]||1));
+      c.stock[g] += out;
+      // 消费（刚性 + 战时需要 + 事件修正）：只能消费实际拥有的，缺口记为"未满足"
+      const base = (c.need[g]||0) * (c.needMul[g]||1) * c.needAll;
+      const need = Math.round(base);
+      const have = Math.max(0, c.stock[g]);
+      const consumed = Math.min(need, have);
+      c.stock[g] = have - consumed;
+      const unmet = need - consumed;                 // 未满足需求 → 加急求购
+      if(unmet > 0 && !silent && g==='grain')
+        addLog(c.name+' 粮仓见底，有 '+unmet+' 份口粮没有着落。','e');
+      const isMain = (c.produce[g]||0) > 0;          // 是否主产
+      const reserve = Math.ceil(need*1.5);           // 想保留的储备
+      let buy=0, sell=0;
+      if(isMain){
+        // 主产：靠卖它为生，产出扣除自用与储备后稳定挂卖单
+        const surplus = c.stock[g] - reserve;
+        if(surplus > 0) sell = Math.floor(surplus * 0.92 * c.exportMul);
+      }
+      // 缺口买入（主产国若受灾也可能买）
+      const gap = c.stock[g] - reserve;
+      if(gap < 0){
+        const panic = (gap < -Math.max(1,need) || unmet>0) ? 1.5 : 1.0;  // 缺口超一年用量 → 恐慌
+        buy = Math.ceil(-gap * panic);
+      }
+      buy += Math.ceil(unmet * 1.2);      // 今年没吃到的，明年补买并加价抢
+      // 上限与预算约束
+      buy  = Math.min(buy,  c.capBuy,  Math.floor(c.coin/Math.max(.1,S.price[g])));
+      sell = Math.min(sell, c.capSell, Math.max(0, c.stock[g]-reserve));
+      if(buy>0)  c.orders.buy[g]  = buy;
+      if(sell>0) c.orders.sell[g] = sell;
+    });
+  });
+
+  // 4. 价格引擎：供需 → 目标价 → 限速
+  GKEYS.forEach(g=>{
+    let D=0, Sp=0;
+    S.countries.forEach(c=>{ D += c.orders.buy[g]||0; Sp += c.orders.sell[g]||0; });
+    if(D + Sp < 5){
+      // 市场几乎无成交：不能因 D=0 把价格砸到下限，改为向基准价缓慢回归
+      S.price[g] = S.prev[g] + (GOODS[g].P0 - S.prev[g])*0.06;
+    } else {
+      // 日常扰动：天气、车马损耗、零星商队——让价格持续小幅波动，才有低买高卖的空间
+      const noise = 0.88 + Math.random()*0.24;
+      const ratio = (D / Math.max(1, Sp)) * noise;
+      const tgt = GOODS[g].P0 * clamp(Math.pow(ratio, GOODS[g].elastic), 0.45, 2.60);
+      S.price[g] = clamp(tgt, S.prev[g]*0.75, S.prev[g]*1.25);
+    }
+    S.hist[g].push(S.price[g]);
+    if(S.hist[g].length>120) S.hist[g].shift();
+  });
+
+  // 5. 结算各国挂单（国家之间成交）
+  S.countries.forEach(c=>{
+    GKEYS.forEach(g=>{
+      const b = c.orders.buy[g]||0;
+      if(b>0){
+        // 找卖方
+        let got=0;
+        const sellers = S.countries.filter(x=>x!==c && (x.orders.sell[g]||0)>0)
+                                   .sort((a,b2)=>S.price[g]-S.price[g]);
+        const afford = Math.floor(Math.max(0,c.coin) / Math.max(.1, S.price[g]));
+        for(const s of sellers){
+          const take = Math.min(b-got, s.orders.sell[g], afford-got);
+          if(take<=0) break;
+          const cost = take*S.price[g];
+          if(s.coin!==undefined){ c.coin-=cost; s.coin+=cost; }
+          c.stock[g]+=take; s.stock[g]-=take;
+          s.orders.sell[g]-=take; got+=take;
+          if(got>=b) break;
+        }
+        if(got<b && !silent){
+          addLog(c.name+' 想买 '+b+' '+GOODS[g].name+'，只买到 '+got+'（市场无货）。','w');
+        }
+      }
+    });
+  });
+
+  // 6. 玩家产出与消耗
+  const p = S.player;
+  GKEYS.forEach(g=>{ p.stock[g] += (p.produce[g]||0); });
+  const eat = p.consume.grain;
+  if(p.stock.grain >= eat) p.stock.grain -= eat;
+  else{
+    const lack = eat - p.stock.grain;
+    p.stock.grain = 0;
+    const cost = Math.ceil(lack * S.price.grain * 2.2);   // 缺粮须高价购粮
+    p.coin -= cost;
+    addLog('口粮不足，被迫以高价购入，支出 '+cost+' 钱。','e');
+  }
+  // 库存上限
+  GKEYS.forEach(g=>{ if(p.stock[g]>999) p.stock[g]=999; });
+}
+
+function nextYear(){ tick(false); render(); }
+function runYears(n){ for(let i=0;i<n;i++) tick(false); render(); }
+
+// ============ 玩家交易 ============
+function currentGood(){ return document.getElementById('tGood').value; }
+function getQty(){ return Math.max(1, Math.floor(+document.getElementById('tQty').value||1)); }
+
+function doSell(){
+  const g = currentGood(), qty0 = getQty();
+  const have = S.player.stock[g];
+  const qty = Math.min(qty0, have);
+  if(qty<=0){ addLog('你没有那么多'+GOODS[g].name+'可卖。','w'); render(); return; }
+
+  // 先卖给各国买单（有收购上限），剩余砸向市场
+  let left=qty, earned=0, soldToCtry=0;
+  const buyers = S.countries.filter(c=>(c.orders.buy[g]||0)>0)
+                            .sort((a,b)=>(b.orders.buy[g]||0)-(a.orders.buy[g]||0));
+  for(const c of buyers){
+    if(left<=0) break;
+    const take = Math.min(left, c.orders.buy[g], Math.floor(c.coin/Math.max(.1,S.price[g])));
+    if(take<=0) continue;
+    const premium = S.price[g] * 1.05;                 // 国家愿付 5% 溢价
+    earned += take*premium; c.coin -= take*premium; c.stock[g]+=take;
+    c.orders.buy[g]-=take; left-=take; soldToCtry+=take;
+  }
+  // 剩余部分：按"相对市场深度"滑点，最多降 35%（不再随绝对量归零）
+  let dumped=0;
+  if(left>0){
+    const slip = left/(left+DEPTH);
+    const avg = S.price[g] * (1 - 0.35*slip);
+    earned += left*avg; dumped=left;
+    S.price[g] = Math.max(GOODS[g].P0*0.45, S.price[g] * (1 - 0.25*slip));
+  }
+  S.player.stock[g] -= qty;
+  S.player.coin += Math.round(earned);
+  let msg = '卖出 '+qty+' '+GOODS[g].name+'：'+soldToCtry+' 被各国收走';
+  if(dumped>0) msg += '，'+dumped+' 砸向市场（均价被压低）';
+  msg += '，得 '+Math.round(earned)+' 钱。';
+  addLog(msg,'t');
+  render();
+}
+
+function doBuy(){
+  const g = currentGood(), qty0 = getQty();
+  const unit = S.price[g]*1.15;                        // 买入有 15% 价差
+  const afford = Math.floor(S.player.coin / unit);
+  const qty = Math.min(qty0, afford);
+  if(qty<=0){ addLog('钱不够买 '+GOODS[g].name+'。','w'); render(); return; }
+
+  // 先从各国卖单买（便宜），不够则推高价格
+  let left=qty, spent=0, fromCtry=0;
+  const sellers = S.countries.filter(c=>(c.orders.sell[g]||0)>0);
+  for(const c of sellers){
+    if(left<=0) break;
+    const take = Math.min(left, c.orders.sell[g]);
+    if(take<=0) continue;
+    const cost = take*S.price[g];
+    spent += cost; c.coin += cost; c.stock[g]-=take;
+    c.orders.sell[g]-=take; left-=take; fromCtry+=take;
+  }
+  let pushed=0;
+  if(left>0){
+    const slip = left/(left+DEPTH);
+    const avg = S.price[g] * (1 + 0.30*slip);
+    spent += left*avg; pushed=left;
+    S.price[g] = Math.min(GOODS[g].P0*2.6, S.price[g] * (1 + 0.25*slip));
+  }
+  S.player.stock[g] += qty;
+  S.player.coin -= Math.round(spent);
+  let msg = '买入 '+qty+' '+GOODS[g].name+'：'+fromCtry+' 来自各国存货';
+  if(pushed>0) msg += '，'+pushed+' 抬价抢购';
+  msg += '，花 '+Math.round(spent)+' 钱。';
+  addLog(msg,'t');
+  render();
+}
+
+function setMax(){
+  const g = currentGood();
+  const unit = S.price[g]*1.15;
+  document.getElementById('tQty').value = Math.max(1, Math.floor(S.player.coin/unit));
+  render();
+}
+
+// ============ 渲染 ============
+function addLog(t,c){ S.log.unshift({y:S.year, t:t, c:c||''}); if(S.log.length>200) S.log.pop(); }
+
+function netWorth(){
+  let v = S.player.coin;
+  GKEYS.forEach(g=> v += S.player.stock[g]*S.price[g]);
+  return v;
+}
+
+function render(){
+  document.getElementById('yr').textContent = '第 '+S.year+' 年';
+  const p = S.player;
+  document.getElementById('assets').innerHTML =
+    ['<div class="coin"><b>'+Math.round(p.coin)+'</b><span class="mut">金币</span></div>']
+    .concat(GKEYS.map(g=>'<div><b>'+Math.round(p.stock[g])+'</b><span class="mut">'+GOODS[g].name
+      +' <span style="opacity:.7">×'+S.price[g].toFixed(2)+'</span></span></div>').join(''))
+    .concat(['<div><b>'+Math.round(netWorth())+'</b><span class="mut">净资产</span></div>'])
+    .join('');
+
+  // 商品卡
+  const sel = currentGood();
+  document.getElementById('goods').innerHTML = GKEYS.map(g=>{
+    const G=GOODS[g], pr=S.price[g], pv=S.prev[g];
+    const d = pr-pv, pct = pv? d/pv*100 : 0;
+    const cls = Math.abs(pct)<0.5?'flat':(d>0?'up':'down');
+    const arw = Math.abs(pct)<0.5?'—':(d>0?'▲':'▼');
+    const h=S.hist[g], mn=Math.min(...h), mx=Math.max(...h), rg=Math.max(.01,mx-mn);
+    const pts = h.slice(-40).map((v,i)=>{
+      const x=i/Math.max(1,Math.min(40,h.length)-1)*100;
+      const y=100-(v-mn)/rg*100;
+      return x.toFixed(1)+','+y.toFixed(1);
+    }).join(' ');
+    return '<div class="good '+(g===sel?'on':'')+'" onclick="document.getElementById(\'tGood\').value=\''+g+'\';render()">'+
+      '<div class="nm" style="color:'+G.color+'">'+G.name+'</div>'+
+      '<div class="pr">'+pr.toFixed(2)+' <span class="'+cls+'" style="font-size:12px">'+arw+' '+Math.abs(pct).toFixed(1)+'%</span></div>'+
+      '<div class="sub">基准 '+G.P0.toFixed(1)+' · 弹性 '+G.elastic+'</div>'+
+      '<svg class="mini" viewBox="0 0 100 100" preserveAspectRatio="none">'+
+        '<polyline points="'+pts+'" fill="none" stroke="'+G.color+'" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>'+
+      '</div>';
+  }).join('');
+
+  // 下拉
+  const sg = document.getElementById('tGood');
+  if(sg.options.length===0){
+    sg.innerHTML = GKEYS.map(g=>'<option value="'+g+'">'+GOODS[g].name+'</option>').join('');
+  }
+  const g2 = currentGood();
+  document.getElementById('selinfo').textContent =
+    '当前 '+GOODS[g2].name+'：卖价 '+S.price[g2].toFixed(2)+' · 买价 '+(S.price[g2]*1.15).toFixed(2)+'（含 15% 价差）';
+  const afford = Math.floor(p.coin/(S.price[g2]*1.15));
+  document.getElementById('tradeHint').innerHTML =
+    '可买 <b>'+afford+'</b> · 可售 <b>'+Math.floor(p.stock[g2])+'</b>　｜　'+
+    '卖出量超过各国收购上限的部分会砸价，买入超出各国存货的部分会抬价。';
+
+  // 国家
+  document.getElementById('countries').innerHTML = S.countries.map(c=>{
+    const ord = GKEYS.map(g=>{
+      const b=c.orders.buy[g]||0, s=c.orders.sell[g]||0;
+      let t='';
+      if(b) t += '<span class="b">买 '+GOODS[g].name+' '+b+'</span>';
+      if(s) t += '<span class="s">卖 '+GOODS[g].name+' '+s+'</span>';
+      return t;
+    }).filter(Boolean).join(' ') || '<span class="mut">自给自足</span>';
+    const ev = c.evt ? '<span class="evt '+
+      (c.evt==='丰收'?'good':(c.evt==='战争'?'war':''))+'">'+c.evt+'</span>' : '';
+    return '<div class="ctry">'+
+      '<div class="top"><div><span class="nm">'+c.name+'</span>'+ev+'</div>'+
+      '<span class="ty">'+c.tname+'</span></div>'+
+      '<div class="stk">存 '+GKEYS.map(g=>GOODS[g].name+Math.round(c.stock[g])).join(' · ')+
+      '　钱 '+Math.round(c.coin)+'</div>'+
+      '<div class="ord">'+ord+'</div>'+
+      '<div class="sub mut" style="font-size:11px;margin-top:3px">'+TYPES[c.type].note+'</div>'+
+      '</div>';
+  }).join('');
+
+  // 日志
+  document.getElementById('log').innerHTML = S.log.slice(0,40).map(l=>
+    '<div><span class="y">'+l.y+'</span>'+(l.c?'<span class="tag '+l.c+'">'+
+    ({e:'事件',w:'警示',g:'平息',t:'交易',war:'战争'}[l.c]||'')+'</span>':'')+l.t+'</div>'
+  ).join('');
+
+  drawChart();
+}
+
+// ============ 价格曲线 ============
+function drawChart(){
+  const cv = document.getElementById('chart');
+  const dpr = window.devicePixelRatio||1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const x = cv.getContext('2d');
+  x.setTransform(dpr,0,0,dpr,0,0);
+  x.clearRect(0,0,w,h);
+  const pad = {l:38,r:10,t:10,b:18};
+  const iw = w-pad.l-pad.r, ih = h-pad.t-pad.b;
+
+  // 网格
+  x.strokeStyle='#2b352a'; x.lineWidth=1; x.font='10px sans-serif'; x.fillStyle='#8a978a';
+  for(let i=0;i<=4;i++){
+    const y = pad.t + ih*i/4;
+    x.beginPath(); x.moveTo(pad.l,y); x.lineTo(w-pad.r,y); x.stroke();
+  }
+  // 找全局最大价用于纵轴
+  let mx = 0;
+  GKEYS.forEach(g=>{ mx = Math.max(mx, ...S.hist[g]); });
+  mx = Math.max(mx, 0.5) * 1.1;
+  for(let i=0;i<=4;i++){
+    const y = pad.t + ih*i/4;
+    x.fillText((mx*(1-i/4)).toFixed(1), 4, y+3);
+  }
+  // 每种商品归一化到共同纵轴
+  GKEYS.forEach(g=>{
+    const h2 = S.hist[g];
+    const n = Math.min(h2.length, 120);
+    x.strokeStyle = GOODS[g].color; x.lineWidth = 2; x.beginPath();
+    for(let i=0;i<n;i++){
+      const idx = h2.length-n+i;
+      const px = pad.l + iw*(n>1? i/(n-1):0);
+      const py = pad.t + ih*(1 - h2[idx]/mx);
+      i? x.lineTo(px,py) : x.moveTo(px,py);
+    }
+    x.stroke();
+  });
+  // 图例
+  let lx = pad.l+6;
+  GKEYS.forEach(g=>{
+    x.fillStyle = GOODS[g].color; x.fillRect(lx, pad.t+2, 10, 3);
+    x.fillStyle='#dfe6dc'; x.font='11px sans-serif';
+    x.fillText(GOODS[g].name+' '+S.price[g].toFixed(2), lx+14, pad.t+8);
+    lx += 72;
+  });
+}
+
+init();
+window.addEventListener('resize', drawChart);
+</script>
+</body>
+</html>
